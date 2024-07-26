@@ -6,7 +6,7 @@
 @Author  :   Li Ruilong
 @Version :   1.0
 @Contact :   liruilonger@gmail.com
-@Desc    :   python 取流转化
+@Desc    :   rtmp 转码 到 hls 
 """
 
 # here put the import lib
@@ -35,35 +35,30 @@ import yaml_util
 import threading
 import datetime
 from fastapi.responses import HTMLResponse
-# 创建 Jinja2 环境
 
 
 env = Environment(loader=FileSystemLoader("templates"))
 
 
+app = FastAPI()
+
+# 创建定时器
+scheduler = AsyncIOScheduler()
+
+
+# 取流添加锁处理
 lock = threading.Lock()
 
 
-# 创建一个处理程序，用于处理 DEBUG 级别的日志消息
-debug_handler = logging.StreamHandler()
-debug_handler.setLevel(logging.DEBUG)
-debug_handler.setFormatter(logging.Formatter(
-    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-
-
 config = yaml_util.get_yaml_config()
-
 nginx = config["ngxin"]
 fastapi = config["fastapi"]
-
-app = FastAPI()
-
 
 locad_id = nginx['nginx_ip']
 locad_port = nginx['nginx_port']
 locad_fix = nginx['nginx_fix']
 nginx_path = nginx['nginx_path']
-nginx_config_path  =  nginx['nginx_config_path']
+nginx_config_path = nginx['nginx_config_path']
 
 port = fastapi['port']
 hls_dir = fastapi['hls_dir']
@@ -74,29 +69,44 @@ ffmpeg_dir = fastapi['ffmpeg_dir']
 max_stream_threads = fastapi['max_stream_threads']
 # 扫描时间
 max_scan_time = fastapi['max_scan_time']
-
+# 最大转码数
+max_code_ff_size = fastapi['max_code_ff_size']
 
 comm = fastapi['comm']
 
 # 添加 CORS 中间件 跨域
 app.add_middleware(
     CORSMiddleware,
+    # 允许跨域的源列表，例如 ["http://www.example.org"] 等等，["*"] 表示允许任何源
     allow_origins=["*"],
-    allow_credentials=True,
+    # 跨域请求是否支持 cookie，默认是 False，如果为 True，allow_origins 必须为具体的源，不可以是 ["*"]
+    allow_credentials=False,
+    # 允许跨域请求的 HTTP 方法列表，默认是 ["GET"]
     allow_methods=["*"],
+    # 允许跨域请求的 HTTP 请求头列表，默认是 []，可以使用 ["*"] 表示允许所有的请求头
+    # 当然 Accept、Accept-Language、Content-Language 以及 Content-Type 总之被允许的
     allow_headers=["*"],
+    # 可以被浏览器访问的响应头, 默认是 []，一般很少指定
+    # expose_headers=["*"]
+    # 设定浏览器缓存 CORS 响应的最长时间，单位是秒。默认为 600，一般也很少指定
+    # max_age=1000
 )
 
-scheduler = AsyncIOScheduler()
+chanle = {}
 
 
 @app.get("/")
 async def get_index():
-
+    """
+    @Time    :   2024/07/26 14:30:36
+    @Author  :   liruilonger@gmail.com
+    @Version :   1.0
+    @Desc    :   欢迎页
+    """
     return {"status": 200, "message": "Holler  Camera "}
 
 
-@app.post("/sc_view/get_video_stream")
+@app.get("/sc_view/get_video_stream")
 async def get_video_stream(
     ip: str = Query("192.168.2.25", description="IP地址"),  # 设置默认值为 1
     width: int = Query(320, description=" 流宽度"),  # 设置默认值为 10
@@ -121,35 +131,41 @@ async def get_video_stream(
         return {"message": "ping no pong", "code": 600}
     with lock:
         # 流是否在采集判断
-        dictc = get_process_by_IP("ffmpeg.exe", ip)
-        if len(dictc) != 0:
-            return dictc[0]
+        # dictc = get_process_by_IP("ffmpeg.exe", ip)
+
+        # if len(dictc) != 0:
+        #    return dictc[0]
+
+        if ip in chanle:
+            return chanle[ip]
+
+        if len(chanle) >= max_code_ff_size:
+            return {"status": 400, "message": f"超过最大取流数：{max_code_ff_size}"}
 
         hls_dir = fastapi['hls_dir']
         ffmpeg_dir = fastapi["ffmpeg_dir"]
         print(vars())
         command = comm.format_map(vars())
         try:
-
             print(command.strip())
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            time.sleep(1)
             if process.pid:
                 t_d = {
                     "pid": process.pid,
                     "v_url": f'http://{locad_id}:{locad_port}{locad_fix}{ip}-{uuid_v}.m3u8',
                     "ip": ip
                 }
-
-                print("摄像头数据更新完成...")
-                time.sleep(3)
+                print(t_d)
+                print("==============================摄像头数据更新完成...，重新确认子进程是否运行")
                 pss = get_process_by_name("ffmpeg.exe", process.pid)
                 print("创建的进程为:", pss)
                 if len(pss) > 0:
+                    chanle[ip] = t_d
+                    print(f"返回取流路径为：{t_d}")
                     return t_d
                 else:
                     return {"status": 400, "message": "IP 取流失败!,请重新尝试"}
@@ -157,7 +173,7 @@ async def get_video_stream(
             return {"error": f"Error running ffmpeg: {e}"}
 
 
-@app.post("/sc_view/stop_video_stream")
+@app.get("/sc_view/stop_video_stream")
 async def stop_video_stream(pid: int = Query(2000, description="进程ID")):
     """
     @Time    :   2024/07/24 14:10:43
@@ -181,6 +197,7 @@ async def stop_video_stream(pid: int = Query(2000, description="进程ID")):
     try:
         # 发送 SIGTERM 信号以关闭进程
         os.kill(int(pid), signal.SIGTERM)
+        chanle.pop(pid)
         print(f"Process {pid} has been terminated.{str(pss)}")
         return {"status": 200, "message": "关闭成功!"}
     except OSError as e:
@@ -190,7 +207,7 @@ async def stop_video_stream(pid: int = Query(2000, description="进程ID")):
         return {"status": 200, "message": "关闭成功!"}
 
 
-@app.post("/sc_view/all_stop_video_stream")
+@app.get("/sc_view/all_stop_video_stream")
 async def all_stop_video_stream():
     """
     @Time    :   2024/07/24 14:10:43
@@ -220,6 +237,7 @@ async def all_stop_video_stream():
         try:
             # 发送 SIGTERM 信号以关闭进程
             os.kill(int(p.info['pid']), signal.SIGTERM)
+            chanle.pop(p.info['pid'])
             print(f"Process {p.info['pid']} has been terminated.{str(pss)}")
         except OSError as e:
             # 调用 kill 命令杀掉
@@ -228,7 +246,7 @@ async def all_stop_video_stream():
     return {"status": 200, "message": "关闭成功!", "close_list": process_list}
 
 
-@app.post("/sc_view/get_video_stream_process_list")
+@app.get("/sc_view/get_video_stream_process_list")
 async def get_video_stream_process_list():
     """
     @Time    :   2024/07/24 15:46:38
@@ -254,7 +272,7 @@ async def get_video_stream_process_list():
     return {"message": "当前在采集的流信息", "process_list": process_list}
 
 
-@app.post("/sc_view/get_video_stream_process_live")
+@app.get("/sc_view/get_video_stream_process_live")
 async def get_video_stream_process_live(pid: int = Query(2000, description="进程ID")):
     """
     @Time    :   2024/07/24 15:46:38
@@ -271,7 +289,8 @@ async def get_video_stream_process_live(pid: int = Query(2000, description="进�
 
     return {"is_running": False}
 
-@app.get("/sc_view/get_video_player",response_class=HTMLResponse)
+
+@app.get("/sc_view/get_video_player", response_class=HTMLResponse)
 async def get_video_player(request: Request):
     """
     @Time    :   2024/07/24 15:46:38
@@ -279,13 +298,13 @@ async def get_video_player(request: Request):
     @Version :   1.0
     @Desc    :   返回当前在采集的所有流处理页面
     """
-    
-    pss = get_process_by_IP("ffmpeg.exe")
-    
-    if len(pss) == 0:
+
+    # pss = get_process_by_IP("ffmpeg.exe")
+    # if len(pss) == 0:
+    if len(chanle) == 0:
         template = env.get_template("empty_page.html")
         return template.render()
-    m3u8_urls =  [  p['v_url'] for p in pss]
+    m3u8_urls = [value['v_url'] for _, value in chanle.items()]
     template = env.get_template("video_player.html")
     return template.render(m3u8_urls=m3u8_urls, request=request)
 
@@ -314,8 +333,6 @@ async def shutdown_event():
     scheduler.shutdown()
 
 
-
-
 # 启动 Nginx
 def start_nginx():
     """
@@ -326,16 +343,18 @@ def start_nginx():
     """
     try:
         os.chdir(nginx_path)
-        print("当前执行路径："+ str(nginx_path + "nginx.exe"))
-        subprocess.Popen([nginx_path + "nginx.exe", "-c", nginx_config_path],stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL)
-        print("===================  Nginx has been started successfully.")
+        print("当前执行路径：" + str(nginx_path + "nginx.exe" + " -c " + nginx_config_path))
+        subprocess.Popen([nginx_path + "nginx.exe", "-c", nginx_config_path], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+        print("\n===================  Nginx has been started successfully.\n")
     except subprocess.CalledProcessError as e:
         print(f"Failed to start Nginx: {e}")
     finally:
-        os.chdir(os.path.dirname(__file__))  # 切换回用户主目录    
+        os.chdir(os.path.dirname(__file__))  # 切换回用户主目录
 
 # 停止 Nginx
+
+
 def stop_nginx():
     """
     @Time    :   2024/07/24 21:13:41
@@ -345,21 +364,24 @@ def stop_nginx():
     """
     try:
         os.chdir(nginx_path)
-        print("当前执行路径："+ str(nginx_path + "nginx.exe"))
-        subprocess.Popen([nginx_path+ "nginx.exe", "-s", "stop"], stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL)
-        print("============  Nginx has been stopped successfully.")
+        print("当前执行路径：" + str(nginx_path + "nginx.exe" + " -s " + "stop"))
+        subprocess.Popen([nginx_path + "nginx.exe", "-s", "stop"], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+        print("\n============  Nginx has been stopped successfully.\n")
     except subprocess.CalledProcessError as e:
         print(f"Failed to stop Nginx: {e}")
     finally:
-        os.chdir(os.path.dirname(__file__))  # 切换回用户主目录    
+        os.chdir(os.path.dirname(__file__))  # 切换回用户主目录
 
 # 重启 Nginx
+
+
 def restart_nginx():
-    ns =  get_process_by_name("nginx.exe")
-    if len(ns) > 0 :
+    ns = get_process_by_name("nginx.exe")
+    if len(ns) > 0:
         stop_nginx()
     start_nginx()
+
 
 def get_process_by_name(process_name, pid=None):
     """
@@ -380,14 +402,14 @@ def get_process_by_name(process_name, pid=None):
     attrs = ['pid', 'memory_percent', 'name', 'cmdline', 'cpu_times',
              'create_time', 'memory_info', 'status', 'nice', 'username']
     for proc in psutil.process_iter(attrs):
-        #print(proc.info['name'])
+        # print(proc.info['name'])
         try:
             if proc.info['name'] == process_name:
                 if pid is None or proc.info['pid'] == pid:
                     processes.append(proc)
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
-    print("Process==================end")    
+    print("Process==================end")
     return processes
 
 
@@ -407,7 +429,7 @@ def get_process_by_IP(process_name, ip=None):
     """
     attrs = ['pid', 'memory_percent', 'name', 'cmdline', 'cpu_times',
              'create_time', 'memory_info', 'status', 'nice', 'username']
-    press= []
+    press = []
     for proc in psutil.process_iter(attrs):
         try:
             if proc.info['name'] == process_name:
@@ -473,6 +495,6 @@ def validate_ip_address(ip_address):
 
 if __name__ == "__main__":
 
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0")
 
 #  uvicorn main:app --reload

@@ -49,7 +49,7 @@ class Yaml:
 
 
     def __str__(self):
-        return json.dumps(self._config)
+        return json.dumps(self._config,indent=4)
 
     def __del__(self):
         self._config = None

@@ -1,33 +1,31 @@
 
+# windows 环境配置文件，目录需要修改为 `/` 分割符
 ngxin:
-  # 启动的推流服务IP
-  nginx_ip : 10.119.120.202
-  # 启动的服务端口
+  # 启动的推流服务IP，取流的时候使用的IP地址
+  nginx_ip : 127.0.0.1 
+  # 启动 ng 端口，取流时使用的端口
   nginx_port: 8080
   # 启动的推流服务前缀 
   nginx_fix : /hls/
-  # nginx 路径
+  # nginx 程序路径，这里不加 `nginx.exe` 实际执行需要跳转到这个目录
   nginx_path: "X:/nginx-rtmp-win32-dev/nginx-rtmp-win32-dev/"
-
+  # nginx 配置文件位置
   nginx_config_path: "X:/nginx-rtmp-win32-dev/nginx-rtmp-win32-dev/conf/nginx.conf"
 
-
-  
-
 fastapi:
-  # 处理流端口
+  # 服务端口
   port: 8991
-  # 处理流存放nginx目录
+  # 流存放nginx目录
   hls_dir: "X:/nginx-rtmp-win32-dev/nginx-rtmp-win32-dev/html/hls/"
   # ffmpeg 执行路径
-  ffmpeg_dir:  'ffmpeg.exe'
+  ffmpeg_dir:  'W:/ffmpeg-20200831-4a11a6f-win64-static//bin/ffmpeg.exe'
   # 最大取流时间
   max_stream_threads : 60
   # 扫描时间
   max_scan_time : 3*60
   # 最大转码数
   max_code_ff_size : 6
-  # ffmpeg 转化路径 
-  comm: "{ffmpeg_dir} -f rtsp -rtsp_transport tcp -i rtsp://admin:hik12345@{ip}:554/Streaming/Channels/101?transportmode=multicast -acodec aac -strict experimental -ar 44100 -ac 2 -b:a 96k -r 25 -b:v 500k -s {width}*{height}  -c:v libx264 -c:a copy -cpu-used 0  -threads 1  -f hls -hls_time 2.0 -hls_list_size 0 -hls_wrap 50 {hls_dir}{ip}-{uuid_v}.m3u8"
+  # ffmpeg 转化执行的路径 
+  comm: "{ffmpeg_dir} -f rtsp -rtsp_transport tcp -i rtsp://admin:hik12345@{ip}:554/Streaming/Channels/101?transportmode=multicast -acodec aac -strict experimental -ar 44100 -ac 2 -b:a 96k -r 25 -b:v 300k -s {width}*{height} -live 1  -c:v libx264 -c:a copy -cpu-used 0  -threads 1  -f hls -hls_time 0.5 -hls_list_size 1 -hls_wrap 100 {hls_dir}{ip}-{uuid_v}.m3u8"
   
 
