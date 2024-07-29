@@ -43,3 +43,5 @@ ffmpeg -f rtsp -rtsp_transport tcp -i rtsp://admin:hik12345@10.112.205.103:554/S
 
 
 pyinstaller --add-data "config.yaml;."  --add-data "templates/*;templates"   main.py   
+
+

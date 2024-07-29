@@ -18,7 +18,7 @@ fastapi:
   # 流存放nginx目录
   hls_dir: "X:/nginx-rtmp-win32-dev/nginx-rtmp-win32-dev/html/hls/"
   # ffmpeg 执行路径
-  ffmpeg_dir:  'W:/ffmpeg-20200831-4a11a6f-win64-static//bin/ffmpeg.exe'
+  ffmpeg_dir:  'W:/ffmpeg-20200831-4a11a6f-win64-static/bin/ffmpeg.exe'
   # 最大取流时间
   max_stream_threads : 60
   # 扫描时间
